@@ -7,7 +7,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN1")), int(os.getenv("ADMIN2"))]
-GROUP_ID = int(os.getenv("GROUP_ID"))
+GROUP_ID = -1002843633996
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 DB = "payments.db"
@@ -110,18 +110,18 @@ def webhook():
 
     msg = f"""
 ━━━━━━━━━━━━━━━━━━
-✅ *PAYMENT RECEIVED*
+✅ 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 𝗥𝗘𝗖𝗘𝗜𝗩𝗘𝗗
 
-👤 *Name:* {name}
-📞 *Phone:* {phone}
-💰 *Amount:* ₹{amount}
-🧾 *UTR:* {utr}
-🔗 *Txn ID:* {pid}
-⏰ *Time:* {time}
+👤 𝗡𝗮𝗺𝗲: {name}
+📞 𝗣𝗵𝗼𝗻𝗲: {phone}
+💰 𝗔𝗺𝗼𝘂𝗻𝘁: ₹{amount}
+🧾 𝗨𝗧𝗥: {utr}
+🔗 𝗧𝘅𝗻 𝗜𝗗: {pid}
+⏰ 𝗧𝗶𝗺𝗲: {time}
 
-📊 *Total Collection:* ₹{bal}
+📊 𝗧𝗼𝘁𝗮𝗹 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 : ₹{bal}
 ━━━━━━━━━━━━━━━━━━
-🤖 ToxicLabs Payment Alerts
+𝙏𝙤𝙭𝙞𝙘𝙇𝙖𝙗𝙨 𝙋𝙖𝙮𝙢𝙚𝙣𝙩 𝘼𝙡𝙚𝙧𝙩𝙨 🌷🫧🌾
 """
 
     send_msg(msg)
