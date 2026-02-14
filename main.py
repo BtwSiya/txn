@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_IDS = [int(os.getenv("ADMIN1")), int(os.getenv("ADMIN2"))]
-GROUP_ID = int(os.getenv("GROUP_ID"))
+ADMIN_IDS = [int(os.getenv("ADMIN1", 0)), int(os.getenv("ADMIN2", 0))]
+GROUP_ID = int(os.getenv("GROUP_ID", 0))
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 DB = "payments.db"
@@ -50,16 +50,29 @@ def total_balance():
 
 # ================= TELEGRAM =================
 def send_msg(text):
+    if not BOT_TOKEN:
+        return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     for cid in ADMIN_IDS + [GROUP_ID]:
-        requests.post(url, json={"chat_id": cid, "text": text, "parse_mode":"HTML"})
+        if cid:
+            try:
+                requests.post(url, json={"chat_id": cid, "text": text, "parse_mode":"HTML"}, timeout=5)
+            except:
+                pass
 
 def send_single(chat_id, text):
+    if not BOT_TOKEN:
+        return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text})
+    try:
+        requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=5)
+    except:
+        pass
 
 # ================= VERIFY =================
 def verify(body, sig):
+    if not WEBHOOK_SECRET or not sig:
+        return False
     gen = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(gen, sig)
 
@@ -68,7 +81,7 @@ def verify(body, sig):
 def telegram_commands():
 
     data = request.json
-    if "message" not in data:
+    if not data or "message" not in data:
         return "ok"
 
     msg = data["message"]
@@ -104,23 +117,28 @@ def webhook():
     sig = request.headers.get("X-Razorpay-Signature")
     body = request.data
 
-    if not verify(body, sig):
-        return "Invalid", 400
+    # verify only if secret set
+    if WEBHOOK_SECRET:
+        if not verify(body, sig):
+            return "Invalid Signature", 400
 
-    data = json.loads(body)
+    try:
+        data = json.loads(body or "{}")
+    except:
+        return "Invalid JSON", 400
 
-    if data["event"] != "payment.captured":
+    if data.get("event") != "payment.captured":
         return "Ignored"
 
-    p = data["payload"]["payment"]["entity"]
-    if p["status"] != "captured":
+    p = data.get("payload", {}).get("payment", {}).get("entity", {})
+    if p.get("status") != "captured":
         return "Ignored"
 
-    amount = p["amount"] / 100
+    amount = p.get("amount", 0) / 100
     name = p.get("notes", {}).get("name", "Customer")
     utr = p.get("acquirer_data", {}).get("rrn", "N/A")
-    pid = p["id"]
-    time = datetime.fromtimestamp(p["created_at"]).strftime("%d %b %Y %I:%M %p")
+    pid = p.get("id", "unknown")
+    time = datetime.fromtimestamp(p.get("created_at", 0)).strftime("%d %b %Y %I:%M %p")
 
     save_payment(pid, name, amount, utr, time)
     bal = total_balance()
@@ -142,6 +160,11 @@ def webhook():
 
     send_msg(msg)
     return jsonify({"status":"ok"})
+
+# ================= HOME =================
+@app.route("/")
+def home():
+    return "Webhook running"
 
 # ================= START =================
 if __name__ == "__main__":
