@@ -7,7 +7,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN1")), int(os.getenv("ADMIN2"))]
-GROUP_ID = -1002843633996
+GROUP_ID = int(os.getenv("GROUP_ID"))
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 DB = "payments.db"
@@ -17,15 +17,13 @@ app = Flask(__name__)
 def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS payments(
+    c.execute("""CREATE TABLE IF NOT EXISTS payments(
         id TEXT PRIMARY KEY,
         name TEXT,
         amount REAL,
         utr TEXT,
         time TEXT
-    )
-    """)
+    )""")
     conn.commit()
     conn.close()
 
@@ -33,13 +31,10 @@ def save_payment(pid, name, amount, utr, time):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("SELECT id FROM payments WHERE id=?", (pid,))
-    if c.fetchone():
-        conn.close()
-        return
-
-    c.execute("INSERT INTO payments VALUES (?,?,?,?,?)",
-              (pid, name, amount, utr, time))
-    conn.commit()
+    if not c.fetchone():
+        c.execute("INSERT INTO payments VALUES (?,?,?,?,?)",
+                  (pid, name, amount, utr, time))
+        conn.commit()
     conn.close()
 
 def total_balance():
@@ -54,11 +49,12 @@ def total_balance():
 def send_msg(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     for cid in ADMIN_IDS + [GROUP_ID]:
-        requests.post(url, json={
+        r = requests.post(url, json={
             "chat_id": cid,
             "text": text,
-            "parse_mode":"Markdown"
+            "parse_mode":"HTML"
         })
+        print("TG:", r.text)   # DEBUG
 
 # ================= VERIFY =================
 def verify(body, sig):
@@ -66,6 +62,29 @@ def verify(body, sig):
         return False
     gen = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(gen, sig)
+
+# ================= TELEGRAM COMMANDS =================
+@app.route(f"/bot{BOT_TOKEN}", methods=["POST"])
+def telegram_commands():
+    data = request.json
+    if "message" not in data:
+        return "ok"
+
+    msg = data["message"]
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text","")
+
+    if text == "/start":
+        send_msg("🤖 ToxicLabs Payment Alerts Bot\n\nBy Toxic — @iscxm")
+        return "ok"
+
+    if chat_id not in ADMIN_IDS:
+        return "ok"
+
+    if text == "/balance":
+        bal = total_balance()
+        send_msg(f"💰 **Total Balance**:</b> ₹{bal}")
+    return "ok"
 
 # ================= WEBHOOK =================
 @app.route("/webhook", methods=["POST"])
@@ -75,37 +94,39 @@ def webhook():
     body = request.data
 
     if not verify(body, sig):
-        return "Invalid Signature", 400
+        print("BAD SIGN")
+        return "Invalid",400
 
     data = json.loads(body)
 
     if data.get("event") != "payment.captured":
         return "Ignored"
 
-    p = data.get("payload", {}).get("payment", {}).get("entity", {})
+    p = data.get("payload",{}).get("payment",{}).get("entity",{})
 
-    # ===== NAME FIX =====
+    # NAME LOGIC
     notes = p.get("notes") or {}
-    if isinstance(notes, list):
+    if isinstance(notes,list):
         notes = notes[0] if notes else {}
 
-    name = notes.get("name") or notes.get("Name") or "Customer"
-    phone = notes.get("phone") or notes.get("Phone") or "N/A"
+    name = notes.get("name") or notes.get("Name") \
+        or p.get("email") \
+        or p.get("contact") \
+        or "Customer"
 
-    # ===== PAYMENT =====
-    amount = p.get("amount", 0) / 100
-    utr = p.get("acquirer_data", {}).get("rrn", "N/A")
+    phone = p.get("contact","N/A")
+    amount = p.get("amount",0)/100
+    utr = p.get("acquirer_data",{}).get("rrn","N/A")
     pid = p.get("id")
 
-    # ===== TIME FIX (UTC → IST) =====
     created = p.get("created_at")
     if created:
-        ist_time = datetime.utcfromtimestamp(created) + timedelta(hours=5, minutes=30)
-        time = ist_time.strftime("%d %b %Y %I:%M %p")
+        ist = datetime.utcfromtimestamp(created)+timedelta(hours=5,minutes=30)
+        time = ist.strftime("%d %b %Y %I:%M %p")
     else:
         time = datetime.now().strftime("%d %b %Y %I:%M %p")
 
-    save_payment(pid, name, amount, utr, time)
+    save_payment(pid,name,amount,utr,time)
     bal = total_balance()
 
     msg = f"""
@@ -125,7 +146,7 @@ def webhook():
 """
 
     send_msg(msg)
-    return jsonify({"status":"ok"})
+    return jsonify({"ok":True})
 
 # ================= START =================
 if __name__ == "__main__":
