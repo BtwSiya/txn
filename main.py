@@ -7,7 +7,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN1")), int(os.getenv("ADMIN2"))]
-GROUP_ID = int(os.getenv("GROUP_ID"))
+GROUP_ID = -1002843633996
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 DB = "payments.db"
