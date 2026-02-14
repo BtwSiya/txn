@@ -1,13 +1,13 @@
 import os, hmac, hashlib, sqlite3, requests, json
 from flask import Flask, request, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(os.getenv("ADMIN1")), int(os.getenv("ADMIN2"))]
-GROUP_ID = -1002843633996
+GROUP_ID = int(os.getenv("GROUP_ID"))
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 DB = "payments.db"
@@ -32,19 +32,21 @@ def init_db():
 def save_payment(pid, name, amount, utr, time):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    try:
-        c.execute("INSERT INTO payments VALUES (?,?,?,?,?)",
-                  (pid, name, amount, utr, time))
-        conn.commit()
-    except:
-        pass
+    c.execute("SELECT id FROM payments WHERE id=?", (pid,))
+    if c.fetchone():
+        conn.close()
+        return
+
+    c.execute("INSERT INTO payments VALUES (?,?,?,?,?)",
+              (pid, name, amount, utr, time))
+    conn.commit()
     conn.close()
 
 def total_balance():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("SELECT SUM(amount) FROM payments")
-    total = c.fetchone()[0] or 0
+    c.execute("SELECT COALESCE(SUM(amount),0) FROM payments")
+    total = c.fetchone()[0]
     conn.close()
     return round(total,2)
 
@@ -52,11 +54,11 @@ def total_balance():
 def send_msg(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     for cid in ADMIN_IDS + [GROUP_ID]:
-        requests.post(url, json={"chat_id": cid, "text": text, "parse_mode":"HTML"})
-
-def send_single(chat_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text})
+        requests.post(url, json={
+            "chat_id": cid,
+            "text": text,
+            "parse_mode":"Markdown"
+        })
 
 # ================= VERIFY =================
 def verify(body, sig):
@@ -81,26 +83,25 @@ def webhook():
         return "Ignored"
 
     p = data.get("payload", {}).get("payment", {}).get("entity", {})
-    if p.get("status") != "captured":
-        return "Ignored"
 
-    # ===== NOTES FIX =====
-    notes = p.get("notes", {})
+    # ===== NAME FIX =====
+    notes = p.get("notes") or {}
     if isinstance(notes, list):
         notes = notes[0] if notes else {}
 
-    name = notes.get("name", "Customer")
-    phone = notes.get("phone", "N/A")
+    name = notes.get("name") or notes.get("Name") or "Customer"
+    phone = notes.get("phone") or notes.get("Phone") or "N/A"
 
-    # ===== PAYMENT INFO =====
+    # ===== PAYMENT =====
     amount = p.get("amount", 0) / 100
     utr = p.get("acquirer_data", {}).get("rrn", "N/A")
-    pid = p.get("id", "N/A")
+    pid = p.get("id")
 
-    # ===== TIME FIX =====
+    # ===== TIME FIX (UTC → IST) =====
     created = p.get("created_at")
     if created:
-        time = datetime.fromtimestamp(created).strftime("%d %b %Y %I:%M %p")
+        ist_time = datetime.utcfromtimestamp(created) + timedelta(hours=5, minutes=30)
+        time = ist_time.strftime("%d %b %Y %I:%M %p")
     else:
         time = datetime.now().strftime("%d %b %Y %I:%M %p")
 
@@ -109,18 +110,18 @@ def webhook():
 
     msg = f"""
 ━━━━━━━━━━━━━━━━━━
-✅ **PAYMENT RECEIVED**
+✅ *PAYMENT RECEIVED*
 
-👤 **Name**: {name}
-📞 **Phone**: {phone}
-💰 **Amount**: ₹{amount}
-🧾 <b>UTR:</b> {utr}
-🔗 <b>Txn ID:</b> {pid}
-⏰ <b>Time:</b> {time}
+👤 *Name:* {name}
+📞 *Phone:* {phone}
+💰 *Amount:* ₹{amount}
+🧾 *UTR:* {utr}
+🔗 *Txn ID:* {pid}
+⏰ *Time:* {time}
 
-📊 <b>Total Collection:</b> ₹{bal}
+📊 *Total Collection:* ₹{bal}
 ━━━━━━━━━━━━━━━━━━
-🤖 <b>ToxicLabs Payment Alerts</b>
+🤖 ToxicLabs Payment Alerts
 """
 
     send_msg(msg)
